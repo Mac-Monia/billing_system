@@ -1,0 +1,43 @@
+spring.application.name=utility-billing-system
+
+# PostgreSQL
+spring.datasource.url=jdbc:postgresql://localhost:5432/utility_billing
+spring.datasource.username=postgres
+spring.datasource.password=your_db_password
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+# JPA
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.properties.hibernate.jdbc.time_zone=Africa/Kigali
+
+# JWT
+app.jwt.secret=change-this-to-a-long-random-secret-key
+app.jwt.expiration-ms=86400000
+
+# Customer email OTP
+app.auth.otp-expiry-minutes=15
+
+# Swagger
+springdoc.api-docs.path=/api-docs
+springdoc.swagger-ui.path=/swagger-ui.html
+
+# Mail
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=your-email@gmail.com
+spring.mail.password=your-gmail-app-password
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+
+app.mail.from=your-email@gmail.com
+app.mail.from-name=WASAC/REG Utility Billing
+app.mail.base-url=http://localhost:8080
+
+server.port=8080
+
+# Billing business rules
+app.billing.overdue-penalty-days=30
+app.billing.disconnection-days=60
