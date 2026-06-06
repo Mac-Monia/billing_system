@@ -3,5 +3,9 @@ package com.utility.billing.enums;
 public enum MeterStatus {
     ACTIVE,
     INACTIVE,
-    DISCONNECTED
+    DISCONNECTED;
+
+    public boolean allowsReadings() {
+        return this == ACTIVE;
+    }
 }

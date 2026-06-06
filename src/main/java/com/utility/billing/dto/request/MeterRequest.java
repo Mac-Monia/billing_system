@@ -6,6 +6,7 @@ import com.utility.billing.validation.ValidationPatterns;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
@@ -28,8 +29,10 @@ public class MeterRequest {
     private MeterType meterType;
 
     @NotNull
+    @PastOrPresent(message = "Installation date cannot be in the future")
     @Schema(example = "2024-01-15")
     private LocalDate installationDate;
 
+    @Schema(description = "ACTIVE or INACTIVE", example = "ACTIVE")
     private MeterStatus status;
 }

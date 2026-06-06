@@ -17,4 +17,12 @@ public interface PenaltyConfigurationRepository extends JpaRepository<PenaltyCon
             ORDER BY p.id DESC
             """)
     Optional<PenaltyConfiguration> findEffectivePenalty(@Param("date") LocalDate date);
+
+    @Query("""
+            SELECT p FROM PenaltyConfiguration p
+            WHERE p.active = true
+              AND p.effectiveTo IS NULL
+            ORDER BY p.effectiveFrom DESC
+            """)
+    Optional<PenaltyConfiguration> findOpenActivePenalty();
 }

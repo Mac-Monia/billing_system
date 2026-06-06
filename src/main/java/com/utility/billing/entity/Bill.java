@@ -1,6 +1,7 @@
 package com.utility.billing.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.utility.billing.enums.BillStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -15,6 +16,7 @@ import java.util.List;
 @Table(name = "bills", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"meter_id", "billing_month", "billing_year"})
 })
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -76,7 +78,7 @@ public class Bill {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
-    private BillStatus status = BillStatus.UNPAID;
+    private BillStatus status = BillStatus.PENDING;
 
     @Column(name = "due_date")
     private LocalDate dueDate;

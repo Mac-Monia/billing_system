@@ -1,5 +1,6 @@
 package com.utility.billing.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.utility.billing.enums.MeterStatus;
 import com.utility.billing.enums.MeterType;
@@ -37,6 +38,7 @@ public class Meter {
     @Builder.Default
     private MeterStatus status = MeterStatus.ACTIVE;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id", nullable = false)
     private Customer customer;

@@ -25,14 +25,22 @@ public class DuplicateCheckService {
         }
     }
 
-    public void assertUniqueCustomerEmail(String email, Long excludeId) {
-        if (excludeId == null) {
+    public void assertUniqueCustomerEmail(String email, Long excludeCustomerId) {
+        if (excludeCustomerId == null) {
             if (customerRepository.existsByEmail(email)) {
                 throw new DuplicateResourceException("Email already exists: " + email);
             }
-        } else if (customerRepository.existsByEmailAndIdNot(email, excludeId)) {
+        } else if (customerRepository.existsByEmailAndIdNot(email, excludeCustomerId)) {
             throw new DuplicateResourceException("Email already exists: " + email);
         }
+
+        userRepository.findByEmail(email).ifPresent(user -> {
+            if (excludeCustomerId == null
+                    || user.getCustomer() == null
+                    || !user.getCustomer().getId().equals(excludeCustomerId)) {
+                throw new DuplicateResourceException("Email already registered: " + email);
+            }
+        });
     }
 
     public void assertUniqueCustomerPhone(String phoneNumber, Long excludeId) {

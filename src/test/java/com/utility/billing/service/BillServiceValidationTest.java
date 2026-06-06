@@ -4,7 +4,6 @@ import com.utility.billing.entity.Bill;
 import com.utility.billing.enums.BillStatus;
 import com.utility.billing.exception.BusinessRuleException;
 import com.utility.billing.repository.BillRepository;
-import com.utility.billing.repository.NotificationRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -22,9 +21,10 @@ class BillServiceValidationTest {
     @Mock private BillRepository billRepository;
     @Mock private MeterReadingService meterReadingService;
     @Mock private TariffService tariffService;
+    @Mock private TaxService taxService;
+    @Mock private PenaltyService penaltyService;
     @Mock private EmailService emailService;
     @Mock private SecurityAccessService securityAccessService;
-    @Mock private NotificationRepository notificationRepository;
     @Mock private MeterService meterService;
     @Mock private AuditService auditService;
 
@@ -34,7 +34,7 @@ class BillServiceValidationTest {
     @Test
     void approve_alreadyApproved_rejected() {
         Bill bill = Bill.builder().id(1L).status(BillStatus.APPROVED).build();
-        when(billRepository.findById(1L)).thenReturn(Optional.of(bill));
+        when(billRepository.findByIdWithDetails(1L)).thenReturn(Optional.of(bill));
 
         assertThrows(BusinessRuleException.class, () -> billService.approve(1L));
     }

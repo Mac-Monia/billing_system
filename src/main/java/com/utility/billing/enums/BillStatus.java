@@ -1,8 +1,9 @@
 package com.utility.billing.enums;
 
 public enum BillStatus {
-    UNPAID,
+    PENDING,
     APPROVED,
     PARTIALLY_PAID,
-    PAID
+    PAID,
+    OVERDUE
 }

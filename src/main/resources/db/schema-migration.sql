@@ -50,3 +50,6 @@ UPDATE customers SET last_name = 'Account' WHERE last_name IS NULL;
 
 ALTER TABLE customers ALTER COLUMN first_name SET NOT NULL;
 ALTER TABLE customers ALTER COLUMN last_name SET NOT NULL;
+
+-- Bill status: legacy UNPAID renamed to PENDING; OVERDUE added
+UPDATE bills SET status = 'PENDING' WHERE status = 'UNPAID';

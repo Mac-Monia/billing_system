@@ -43,7 +43,8 @@ class CustomerServiceValidationTest {
         validRequest.setLastName("Uwase");
         validRequest.setNationalId("1234567890123456");
         validRequest.setEmail("jean@example.com");
-        validRequest.setPhoneNumber("+250788310922");
+        validRequest.setCountryCode("+250");
+        validRequest.setPhone("788310922");
         validRequest.setAddress("Kigali");
         validRequest.setDateOfBirth(LocalDate.of(1995, 1, 1));
     }

@@ -40,7 +40,7 @@ public class BillController {
     }
 
     @PutMapping("/{billId}/approve")
-    @PreAuthorize("hasRole('FINANCE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'FINANCE')")
     public Bill approve(@PathVariable Long billId) {
         return billService.approve(billId);
     }

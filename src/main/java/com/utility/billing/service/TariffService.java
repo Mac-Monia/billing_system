@@ -28,12 +28,14 @@ public class TariffService {
     private final TariffRepository tariffRepository;
     private final AuditService auditService;
 
+    @Transactional(readOnly = true)
     public List<Tariff> findAll() {
-        return tariffRepository.findAll();
+        return tariffRepository.findAllWithTiers();
     }
 
+    @Transactional(readOnly = true)
     public Tariff findById(Long id) {
-        return tariffRepository.findById(id)
+        return tariffRepository.findByIdWithTiers(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Tariff not found: " + id));
     }
 
@@ -51,6 +53,11 @@ public class TariffService {
 
         tariffRepository.findTopByMeterTypeOrderByVersionDesc(request.getMeterType())
                 .ifPresent(current -> {
+                    if (!request.getEffectiveFrom().isAfter(current.getEffectiveFrom())) {
+                        throw new BusinessRuleException(
+                                "New tariff must take effect after the current tariff (after "
+                                        + current.getEffectiveFrom() + ")");
+                    }
                     if (current.getEffectiveTo() == null
                             && current.getEffectiveFrom().isBefore(request.getEffectiveFrom())) {
                         current.setEffectiveTo(request.getEffectiveFrom());
@@ -62,12 +69,16 @@ public class TariffService {
         Tariff tariff = buildTariffFromRequest(request, nextVersion);
         tariff = tariffRepository.save(tariff);
         auditService.log(AuditActionType.CREATE, "Tariff", tariff.getId(), null, tariff.getVersion().toString());
-        return tariff;
+        return tariffRepository.findByIdWithTiers(tariff.getId()).orElse(tariff);
     }
 
     @Transactional
     public Tariff update(Long id, TariffRequest request) {
         Tariff tariff = findById(id);
+        if (!tariff.getEffectiveFrom().isAfter(LocalDate.now())) {
+            throw new BusinessRuleException(
+                    "Published tariffs are immutable; create a new version with a future effective date");
+        }
         validateTariffRequest(request);
         tariff.setMeterType(request.getMeterType());
         tariff.setTariffType(request.getTariffType());
@@ -90,7 +101,7 @@ public class TariffService {
         }
         tariff = tariffRepository.save(tariff);
         auditService.log(AuditActionType.UPDATE, "Tariff", tariff.getId(), null, tariff.getVersion().toString());
-        return tariff;
+        return tariffRepository.findByIdWithTiers(tariff.getId()).orElse(tariff);
     }
 
     public BigDecimal calculateConsumptionCharge(Tariff tariff, BigDecimal consumption) {
@@ -124,8 +135,10 @@ public class TariffService {
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
     }
 
+    @Transactional(readOnly = true)
     public Tariff findEffectiveTariff(MeterType meterType, LocalDate billingDate) {
-        return tariffRepository.findEffectiveTariff(meterType, billingDate)
+        return tariffRepository.findEffectiveTariffs(meterType, billingDate).stream()
+                .findFirst()
                 .orElseThrow(() -> new BusinessRuleException(
                         "No active tariff for " + meterType + " on " + billingDate));
     }

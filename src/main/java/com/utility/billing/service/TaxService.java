@@ -2,6 +2,7 @@ package com.utility.billing.service;
 
 import com.utility.billing.dto.request.TaxConfigurationRequest;
 import com.utility.billing.entity.TaxConfiguration;
+import com.utility.billing.exception.BusinessRuleException;
 import com.utility.billing.repository.TaxConfigurationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,19 @@ public class TaxService {
 
     @Transactional
     public TaxConfiguration create(TaxConfigurationRequest request) {
+        validateEffectiveFrom(request.getEffectiveFrom());
+
+        taxRepository.findOpenActiveByName(request.getName()).ifPresent(current -> {
+            if (!request.getEffectiveFrom().isAfter(current.getEffectiveFrom())) {
+                throw new BusinessRuleException(
+                        "New tax configuration must take effect after the current one (after "
+                                + current.getEffectiveFrom() + ")");
+            }
+            current.setEffectiveTo(request.getEffectiveFrom());
+            current.setActive(false);
+            taxRepository.save(current);
+        });
+
         TaxConfiguration tax = TaxConfiguration.builder()
                 .name(request.getName())
                 .rate(request.getRate())
@@ -42,5 +56,11 @@ public class TaxService {
             totalTax = totalTax.add(taxAmount);
         }
         return totalTax;
+    }
+
+    private void validateEffectiveFrom(LocalDate effectiveFrom) {
+        if (effectiveFrom.isBefore(LocalDate.now())) {
+            throw new BusinessRuleException("Effective date cannot be in the past");
+        }
     }
 }

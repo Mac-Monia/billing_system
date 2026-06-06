@@ -16,6 +16,7 @@ import com.utility.billing.repository.PaymentRepository;
 import com.utility.billing.repository.UserRepository;
 import com.utility.billing.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,7 @@ public class PaymentService {
     private final UserRepository userRepository;
     private final SecurityAccessService securityAccessService;
     private final AuditService auditService;
+    private final ObjectProvider<DatabasePaymentExecutor> databasePaymentExecutor;
 
     @Transactional(readOnly = true)
     public List<Payment> findAll() {
@@ -69,15 +71,18 @@ public class PaymentService {
                 .orElseThrow(() -> new ResourceNotFoundException("Bill not found: " + request.getBillReference()));
 
         securityAccessService.assertCustomerOwnsBill(bill);
-        bill = billService.applyOverdueRules(bill);
+        Bill billForPayment = billService.applyOverdueRules(bill);
+        final Long billId = billForPayment.getId();
 
-        if (bill.getStatus() == BillStatus.PAID) {
+        if (billForPayment.getStatus() == BillStatus.PAID) {
             throw new BusinessRuleException("Bill is already fully paid");
         }
-        if (bill.getStatus() != BillStatus.APPROVED && bill.getStatus() != BillStatus.PARTIALLY_PAID) {
+        if (billForPayment.getStatus() != BillStatus.APPROVED
+                && billForPayment.getStatus() != BillStatus.PARTIALLY_PAID
+                && billForPayment.getStatus() != BillStatus.OVERDUE) {
             throw new BusinessRuleException("Payments can only be recorded for approved bills");
         }
-        if (request.getAmount().compareTo(bill.getOutstandingBalance()) > 0) {
+        if (request.getAmount().compareTo(billForPayment.getOutstandingBalance()) > 0) {
             throw new BusinessRuleException("Payment amount exceeds outstanding balance");
         }
 
@@ -85,42 +90,69 @@ public class PaymentService {
         User recorder = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
+        String reference = generatePaymentReference();
+
+        DatabasePaymentExecutor executor = databasePaymentExecutor.getIfAvailable();
+        Payment payment;
+        Bill updatedBill;
+
+        if (executor != null) {
+            executor.processPayment(
+                    billId,
+                    request.getAmount(),
+                    request.getPaymentMethod(),
+                    reference,
+                    request.getPaymentDate());
+
+            updatedBill = billRepository.findByIdWithDetails(billId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Bill not found: " + billId));
+            payment = paymentRepository.findByPaymentReference(reference)
+                    .orElseThrow(() -> new ResourceNotFoundException("Payment not found: " + reference));
+            payment.setRecordedBy(recorder);
+            payment = paymentRepository.save(payment);
+        } else {
+            payment = Payment.builder()
+                    .paymentReference(reference)
+                    .bill(billForPayment)
+                    .amount(request.getAmount())
+                    .paymentMethod(request.getPaymentMethod())
+                    .paymentDate(request.getPaymentDate())
+                    .recordedAt(LocalDateTime.now())
+                    .recordedBy(recorder)
+                    .build();
+            paymentRepository.save(payment);
+
+            billForPayment.setAmountPaid(billForPayment.getAmountPaid().add(request.getAmount()));
+            billForPayment.setOutstandingBalance(billForPayment.getOutstandingBalance().subtract(request.getAmount()));
+
+            if (billForPayment.getOutstandingBalance().compareTo(BigDecimal.ZERO) <= 0) {
+                billForPayment.setOutstandingBalance(BigDecimal.ZERO);
+                billForPayment.setStatus(BillStatus.PAID);
+            } else {
+                billForPayment.setStatus(BillStatus.PARTIALLY_PAID);
+            }
+            updatedBill = billRepository.save(billForPayment);
+        }
+
+        if (updatedBill.getStatus() == BillStatus.PAID) {
+            reconnectMeterIfNeeded(updatedBill.getMeter());
+        }
+
+        auditService.log(AuditActionType.PAYMENT, "Bill", updatedBill.getId(),
+                updatedBill.getOutstandingBalance().toPlainString(), updatedBill.getStatus().name());
+        return payment;
+    }
+
+    private String generatePaymentReference() {
         String reference = "PAY-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         while (paymentRepository.existsByPaymentReference(reference)) {
             reference = "PAY-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         }
-
-        Payment payment = Payment.builder()
-                .paymentReference(reference)
-                .bill(bill)
-                .amount(request.getAmount())
-                .paymentMethod(request.getPaymentMethod())
-                .paymentDate(request.getPaymentDate())
-                .recordedAt(LocalDateTime.now())
-                .recordedBy(recorder)
-                .build();
-
-        paymentRepository.save(payment);
-
-        bill.setAmountPaid(bill.getAmountPaid().add(request.getAmount()));
-        bill.setOutstandingBalance(bill.getOutstandingBalance().subtract(request.getAmount()));
-
-        if (bill.getOutstandingBalance().compareTo(BigDecimal.ZERO) <= 0) {
-            bill.setOutstandingBalance(BigDecimal.ZERO);
-            bill.setStatus(BillStatus.PAID);
-            reconnectMeterIfNeeded(bill.getMeter());
-        } else {
-            bill.setStatus(BillStatus.PARTIALLY_PAID);
-        }
-        billRepository.save(bill);
-
-        auditService.log(AuditActionType.PAYMENT, "Bill", bill.getId(),
-                bill.getOutstandingBalance().toPlainString(), bill.getStatus().name());
-        return payment;
+        return reference;
     }
 
     private void reconnectMeterIfNeeded(Meter meter) {
-        if (meter.getStatus() == MeterStatus.DISCONNECTED) {
+        if (meter != null && meter.getStatus() == MeterStatus.DISCONNECTED) {
             meter.setStatus(MeterStatus.ACTIVE);
             meterRepository.save(meter);
             auditService.log(AuditActionType.RECONNECT, "Meter", meter.getId(),

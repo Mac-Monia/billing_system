@@ -17,14 +17,14 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
-@Tag(name = "Authentication", description = "Customer registration with OTP, staff login, password change")
+@Tag(name = "Authentication", description = "Customer registration, staff registration (admin), login, password change")
 public class AuthController {
 
     private final AuthService authService;
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Customer self-registration (sends OTP to email)")
+    @Operation(summary = "Register customer (public) or staff user (admin only, requires Bearer token)")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
         return authService.register(request);
     }

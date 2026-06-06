@@ -1,5 +1,6 @@
 package com.utility.billing.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.utility.billing.enums.MeterType;
 import com.utility.billing.enums.TariffType;
 import jakarta.persistence.*;
@@ -12,6 +13,7 @@ import java.util.List;
 
 @Entity
 @Table(name = "tariffs")
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Getter
 @Setter
 @NoArgsConstructor

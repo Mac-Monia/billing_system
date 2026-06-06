@@ -1,5 +1,7 @@
 package com.utility.billing.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -10,6 +12,7 @@ import java.time.LocalDate;
 @Table(name = "meter_readings", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"meter_id", "billing_month", "billing_year"})
 })
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -21,6 +24,7 @@ public class MeterReading {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "meter_id", nullable = false)
     private Meter meter;
@@ -43,6 +47,7 @@ public class MeterReading {
     @Column(name = "billing_year", nullable = false)
     private Integer billingYear;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "captured_by")
     private User capturedBy;

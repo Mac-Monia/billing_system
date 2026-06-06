@@ -1,17 +1,81 @@
 -- PostgreSQL database routines for Utility Billing System
+-- Message format:
+-- Dear <CustomerName>,
+-- Your <Month/Year> utility bill of <Amount> FRW has been successfully processed.
 
--- Trigger: notification when bill is approved
-CREATE OR REPLACE FUNCTION notify_on_bill_approval()
-RETURNS TRIGGER AS $$
-DECLARE
-    customer_name VARCHAR(255);
+-- Shared helper: billing period label (e.g. "June 2026")
+CREATE OR REPLACE FUNCTION format_billing_period(p_month INTEGER, p_year INTEGER)
+RETURNS TEXT
+LANGUAGE plpgsql
+AS $$
 BEGIN
-    IF NEW.status = 'APPROVED' AND (OLD.status IS DISTINCT FROM NEW.status) THEN
-        SELECT first_name || ' ' || last_name INTO customer_name FROM customers WHERE id = NEW.customer_id;
+    RETURN TRIM(TO_CHAR(MAKE_DATE(p_year, p_month, 1), 'TMMonth YYYY'));
+END;
+$$;
+
+-- Shared helper: notification message body
+CREATE OR REPLACE FUNCTION build_utility_bill_message(
+    p_customer_id BIGINT,
+    p_billing_month INTEGER,
+    p_billing_year INTEGER,
+    p_amount NUMERIC
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_customer_name TEXT;
+    v_period TEXT;
+BEGIN
+    SELECT TRIM(first_name || ' ' || last_name)
+    INTO v_customer_name
+    FROM customers
+    WHERE id = p_customer_id;
+
+    v_period := format_billing_period(p_billing_month, p_billing_year);
+
+    RETURN 'Dear ' || v_customer_name || E',\nYour ' || v_period
+        || ' utility bill of ' || p_amount || ' FRW has been successfully processed.';
+END;
+$$;
+
+-- Trigger: notify customer when a bill is generated (INSERT)
+CREATE OR REPLACE FUNCTION notify_on_bill_generation()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO notifications (customer_id, message, created_at, is_read)
+    VALUES (
+        NEW.customer_id,
+        build_utility_bill_message(NEW.customer_id, NEW.billing_month, NEW.billing_year, NEW.total_amount),
+        NOW(),
+        false
+    );
+
+    UPDATE bills SET notification_sent = true WHERE id = NEW.id;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_bill_notification ON bills;
+DROP TRIGGER IF EXISTS trg_bill_approval_notification ON bills;
+DROP TRIGGER IF EXISTS trg_bill_generation_notification ON bills;
+CREATE TRIGGER trg_bill_generation_notification
+    AFTER INSERT ON bills
+    FOR EACH ROW
+    EXECUTE PROCEDURE notify_on_bill_generation();
+
+-- Trigger: notify customer when bill status becomes PAID (full payment via application layer)
+CREATE OR REPLACE FUNCTION notify_on_bill_paid()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'PAID'
+       AND (OLD.status IS DISTINCT FROM NEW.status)
+       AND OLD.status IN ('APPROVED', 'PARTIALLY_PAID', 'OVERDUE') THEN
         INSERT INTO notifications (customer_id, message, created_at, is_read)
         VALUES (
             NEW.customer_id,
-            'Dear ' || customer_name || ', Your utility bill of FRW ' || NEW.total_amount || ' has been successfully processed.',
+            build_utility_bill_message(NEW.customer_id, NEW.billing_month, NEW.billing_year, NEW.total_amount),
             NOW(),
             false
         );
@@ -20,14 +84,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_bill_notification ON bills;
-DROP TRIGGER IF EXISTS trg_bill_approval_notification ON bills;
-CREATE TRIGGER trg_bill_approval_notification
+DROP TRIGGER IF EXISTS trg_bill_paid_notification ON bills;
+CREATE TRIGGER trg_bill_paid_notification
     AFTER UPDATE ON bills
     FOR EACH ROW
-    EXECUTE PROCEDURE notify_on_bill_approval();
+    EXECUTE PROCEDURE notify_on_bill_paid();
 
--- Stored procedure: process payment and notify on full settlement
+-- Stored procedure: record payment, update bill status, notify on full settlement (uses a cursor)
+-- Full-payment notification is created by trg_bill_paid_notification when status becomes PAID.
 CREATE OR REPLACE PROCEDURE process_payment_and_notify(
     p_bill_id BIGINT,
     p_amount NUMERIC,
@@ -38,21 +102,36 @@ CREATE OR REPLACE PROCEDURE process_payment_and_notify(
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_outstanding NUMERIC;
+    bill_cursor CURSOR FOR
+        SELECT id, customer_id, billing_month, billing_year, total_amount, outstanding_balance, status
+        FROM bills
+        WHERE id = p_bill_id
+        FOR UPDATE;
+
+    v_bill_id BIGINT;
     v_customer_id BIGINT;
+    v_billing_month INTEGER;
+    v_billing_year INTEGER;
     v_total NUMERIC;
-    v_customer_name VARCHAR(255);
+    v_outstanding NUMERIC;
+    v_status VARCHAR(50);
     v_new_outstanding NUMERIC;
 BEGIN
-    SELECT outstanding_balance, customer_id, total_amount
-    INTO v_outstanding, v_customer_id, v_total
-    FROM bills WHERE id = p_bill_id FOR UPDATE;
-
-    IF v_outstanding IS NULL THEN
+    OPEN bill_cursor;
+    FETCH bill_cursor INTO v_bill_id, v_customer_id, v_billing_month, v_billing_year,
+        v_total, v_outstanding, v_status;
+    IF NOT FOUND THEN
+        CLOSE bill_cursor;
         RAISE EXCEPTION 'Bill not found: %', p_bill_id;
     END IF;
 
+    IF v_status NOT IN ('APPROVED', 'PARTIALLY_PAID', 'OVERDUE') THEN
+        CLOSE bill_cursor;
+        RAISE EXCEPTION 'Payments can only be recorded for approved bills';
+    END IF;
+
     IF p_amount > v_outstanding THEN
+        CLOSE bill_cursor;
         RAISE EXCEPTION 'Payment amount exceeds outstanding balance';
     END IF;
 
@@ -66,60 +145,17 @@ BEGIN
         outstanding_balance = GREATEST(v_new_outstanding, 0),
         status = CASE
             WHEN v_new_outstanding <= 0 THEN 'PAID'
-            WHEN v_new_outstanding > 0 AND v_new_outstanding < total_amount THEN 'PARTIALLY_PAID'
+            WHEN v_new_outstanding > 0 THEN 'PARTIALLY_PAID'
             ELSE status
         END
     WHERE id = p_bill_id;
 
-    IF v_new_outstanding <= 0 THEN
-        SELECT first_name || ' ' || last_name INTO v_customer_name FROM customers WHERE id = v_customer_id;
-        INSERT INTO notifications (customer_id, message, created_at, is_read)
-        VALUES (
-            v_customer_id,
-            'Dear ' || v_customer_name || ', Your utility bill of FRW ' || v_total || ' has been successfully processed.',
-            NOW(),
-            false
-        );
-    END IF;
+    CLOSE bill_cursor;
+    -- Full-payment notification is created by trg_bill_paid_notification when status becomes PAID
 END;
 $$;
 
--- Trigger: notify on full payment
-CREATE OR REPLACE FUNCTION notify_on_full_payment()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_status VARCHAR(50);
-    v_customer_id BIGINT;
-    v_total NUMERIC;
-    v_customer_name VARCHAR(255);
-BEGIN
-    SELECT status, customer_id, total_amount
-    INTO v_status, v_customer_id, v_total
-    FROM bills WHERE id = NEW.bill_id;
-
-    IF v_status = 'PAID' THEN
-        SELECT first_name || ' ' || last_name INTO v_customer_name FROM customers WHERE id = v_customer_id;
-        IF NOT EXISTS (
-            SELECT 1 FROM notifications n
-            WHERE n.customer_id = v_customer_id
-              AND n.message LIKE '%FRW ' || v_total || '%'
-              AND n.created_at > NOW() - INTERVAL '1 minute'
-        ) THEN
-            INSERT INTO notifications (customer_id, message, created_at, is_read)
-            VALUES (
-                v_customer_id,
-                'Dear ' || v_customer_name || ', Your utility bill of FRW ' || v_total || ' has been successfully processed.',
-                NOW(),
-                false
-            );
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
+-- Remove legacy payment-insert trigger (bill status is updated before notification via bill UPDATE trigger)
 DROP TRIGGER IF EXISTS trg_full_payment_notification ON payments;
-CREATE TRIGGER trg_full_payment_notification
-    AFTER INSERT ON payments
-    FOR EACH ROW
-    EXECUTE PROCEDURE notify_on_full_payment();
+DROP FUNCTION IF EXISTS notify_on_full_payment();
+DROP FUNCTION IF EXISTS notify_on_bill_approval();

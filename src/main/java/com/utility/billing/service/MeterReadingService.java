@@ -60,8 +60,16 @@ public class MeterReadingService {
     public MeterReading capture(MeterReadingRequest request) {
         Meter meter = meterService.findById(request.getMeterId());
 
-        if (meter.getStatus() != MeterStatus.ACTIVE) {
+        if (!meter.getStatus().allowsReadings()) {
             throw new BusinessRuleException("Meter must be active to capture readings");
+        }
+
+        if (!meter.getCustomer().getStatus().canReceiveBills()) {
+            throw new BusinessRuleException("Inactive customers cannot receive meter readings or bills");
+        }
+
+        if (request.getReadingDate().isBefore(meter.getInstallationDate())) {
+            throw new BusinessRuleException("Reading date cannot be before meter installation date");
         }
 
         if (request.getCurrentReading().compareTo(request.getPreviousReading()) <= 0) {
@@ -80,9 +88,6 @@ public class MeterReadingService {
         }
 
         BigDecimal consumption = request.getCurrentReading().subtract(request.getPreviousReading());
-        if (consumption.compareTo(BigDecimal.ZERO) < 0) {
-            throw new BusinessRuleException("Consumption cannot be negative");
-        }
 
         UserPrincipal principal = (UserPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         User operator = userRepository.findById(principal.getId())

@@ -7,8 +7,10 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
+    Optional<Payment> findByPaymentReference(String paymentReference);
     List<Payment> findByBillId(Long billId);
     boolean existsByPaymentReference(String paymentReference);
     void deleteByBillId(Long billId);

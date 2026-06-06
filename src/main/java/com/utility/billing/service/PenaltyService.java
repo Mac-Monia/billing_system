@@ -2,6 +2,7 @@ package com.utility.billing.service;
 
 import com.utility.billing.dto.request.PenaltyConfigurationRequest;
 import com.utility.billing.entity.PenaltyConfiguration;
+import com.utility.billing.exception.BusinessRuleException;
 import com.utility.billing.repository.PenaltyConfigurationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,19 @@ public class PenaltyService {
 
     @Transactional
     public PenaltyConfiguration create(PenaltyConfigurationRequest request) {
+        validateEffectiveFrom(request.getEffectiveFrom());
+
+        penaltyRepository.findOpenActivePenalty().ifPresent(current -> {
+            if (!request.getEffectiveFrom().isAfter(current.getEffectiveFrom())) {
+                throw new BusinessRuleException(
+                        "New penalty configuration must take effect after the current one (after "
+                                + current.getEffectiveFrom() + ")");
+            }
+            current.setEffectiveTo(request.getEffectiveFrom());
+            current.setActive(false);
+            penaltyRepository.save(current);
+        });
+
         PenaltyConfiguration penalty = PenaltyConfiguration.builder()
                 .name(request.getName())
                 .ratePercent(request.getRatePercent())
@@ -40,5 +54,11 @@ public class PenaltyService {
                 .map(p -> outstanding.multiply(p.getRatePercent())
                         .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP))
                 .orElse(BigDecimal.ZERO);
+    }
+
+    private void validateEffectiveFrom(LocalDate effectiveFrom) {
+        if (effectiveFrom.isBefore(LocalDate.now())) {
+            throw new BusinessRuleException("Effective date cannot be in the past");
+        }
     }
 }

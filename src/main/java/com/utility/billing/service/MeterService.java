@@ -5,6 +5,7 @@ import com.utility.billing.entity.Customer;
 import com.utility.billing.entity.Meter;
 import com.utility.billing.enums.AuditActionType;
 import com.utility.billing.enums.MeterStatus;
+import com.utility.billing.enums.MeterType;
 import com.utility.billing.exception.BusinessRuleException;
 import com.utility.billing.exception.ResourceNotFoundException;
 import com.utility.billing.repository.BillRepository;
@@ -15,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -46,6 +48,7 @@ public class MeterService {
     public Meter create(MeterRequest request) {
         Customer customer = customerService.findById(request.getCustomerId());
         duplicateCheckService.assertUniqueMeterNumber(request.getMeterNumber(), null);
+        validateMeterRequest(request);
 
         Meter meter = Meter.builder()
                 .meterNumber(request.getMeterNumber())
@@ -67,6 +70,8 @@ public class MeterService {
         if (!meter.getCustomer().getId().equals(request.getCustomerId())) {
             throw new BusinessRuleException("A meter cannot be reassigned to another customer");
         }
+
+        validateMeterRequest(request);
 
         meter.setMeterNumber(request.getMeterNumber());
         meter.setMeterType(request.getMeterType());
@@ -102,5 +107,23 @@ public class MeterService {
         auditService.log(AuditActionType.RECONNECT, "Meter", meter.getId(),
                 MeterStatus.DISCONNECTED.name(), MeterStatus.ACTIVE.name());
         return meter;
+    }
+
+    private void validateMeterRequest(MeterRequest request) {
+        Customer customer = customerService.findById(request.getCustomerId());
+
+        if (!customer.getStatus().canReceiveBills()) {
+            throw new BusinessRuleException("Meters cannot be assigned to inactive customers");
+        }
+
+        if (request.getInstallationDate().isAfter(LocalDate.now())) {
+            throw new BusinessRuleException("Installation date cannot be in the future");
+        }
+
+        String expectedPrefix = request.getMeterType() == MeterType.WATER ? "WM-" : "EM-";
+        if (!request.getMeterNumber().startsWith(expectedPrefix)) {
+            throw new BusinessRuleException(
+                    "Meter number prefix must match meter type (WM- for water, EM- for electricity)");
+        }
     }
 }
