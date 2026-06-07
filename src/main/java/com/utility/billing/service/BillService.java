@@ -122,7 +122,9 @@ public class BillService {
 
         bill = billRepository.save(bill);
         auditService.log(AuditActionType.CREATE, "Bill", bill.getId(), null, bill.getBillNumber());
-        return billRepository.findByIdWithDetails(bill.getId()).orElse(bill);
+        bill = billRepository.findByIdWithDetails(bill.getId()).orElse(bill);
+        emailService.sendBillGenerationEmail(bill);
+        return bill;
     }
 
     @Transactional

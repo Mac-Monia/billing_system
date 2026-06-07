@@ -39,14 +39,24 @@ import static org.mockito.Mockito.lenient;
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceValidationTest {
 
-    @Mock private PaymentRepository paymentRepository;
-    @Mock private BillRepository billRepository;
-    @Mock private MeterRepository meterRepository;
-    @Mock private BillService billService;
-    @Mock private UserRepository userRepository;
-    @Mock private SecurityAccessService securityAccessService;
-    @Mock private AuditService auditService;
-    @Mock private ObjectProvider<DatabasePaymentExecutor> databasePaymentExecutor;
+    @Mock
+    private PaymentRepository paymentRepository;
+    @Mock
+    private BillRepository billRepository;
+    @Mock
+    private MeterRepository meterRepository;
+    @Mock
+    private BillService billService;
+    @Mock
+    private UserRepository userRepository;
+    @Mock
+    private SecurityAccessService securityAccessService;
+    @Mock
+    private AuditService auditService;
+    @Mock
+    private EmailService emailService;
+    @Mock
+    private ObjectProvider<DatabasePaymentExecutor> databasePaymentExecutor;
 
     @InjectMocks
     private PaymentService paymentService;
@@ -131,6 +141,7 @@ class PaymentServiceValidationTest {
     @Test
     void recordPayment_fullPayment_marksBillPaid() {
         stubSuccessfulPaymentRecording();
+        when(billRepository.findByIdWithDetails(10L)).thenReturn(Optional.of(approvedBill));
 
         withSecurityContext(() -> paymentService.recordPayment(request));
 
@@ -138,6 +149,7 @@ class PaymentServiceValidationTest {
         assertEquals(BigDecimal.ZERO, approvedBill.getOutstandingBalance());
         assertEquals(BillStatus.PAID, approvedBill.getStatus());
         verify(billRepository).save(approvedBill);
+        verify(emailService).sendBillPaidEmail(any());
     }
 
     private Authentication authentication;

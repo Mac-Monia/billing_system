@@ -13,6 +13,10 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -113,6 +117,31 @@ public class EmailService {
                 "Dear %s,%n%nYour utility bill of FRW %s has been approved.%nBill: %s%nDue: %s",
                 customer.getFullNames(), bill.getTotalAmount(), bill.getBillNumber(), bill.getDueDate());
         send(customer.getEmail(), "Utility Bill Approved - " + bill.getBillNumber(), body);
+    }
+
+    public void sendBillGenerationEmail(Bill bill) {
+        sendBillProcessedEmail(bill, "Utility Bill Generated");
+    }
+
+    public void sendBillPaidEmail(Bill bill) {
+        sendBillProcessedEmail(bill, "Utility Bill Paid");
+    }
+
+    private void sendBillProcessedEmail(Bill bill, String subjectPrefix) {
+        Customer customer = bill.getCustomer();
+        if (customer == null || customer.getEmail() == null || customer.getEmail().isBlank()) {
+            return;
+        }
+        String body = buildUtilityBillMessage(customer.getFullNames(), bill);
+        send(customer.getEmail(), subjectPrefix + " - " + bill.getBillNumber(), body);
+    }
+
+    private String buildUtilityBillMessage(String customerName, Bill bill) {
+        String period = YearMonth.of(bill.getBillingYear(), bill.getBillingMonth())
+                .format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH));
+        return String.format(
+                "Dear %s,%nYour %s utility bill of %s FRW has been successfully processed.",
+                customerName, period, bill.getTotalAmount());
     }
 
     private void send(String to, String subject, String body) {

@@ -16,7 +16,9 @@ import com.utility.billing.repository.PaymentRepository;
 import com.utility.billing.repository.UserRepository;
 import com.utility.billing.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentService {
 
     private final PaymentRepository paymentRepository;
@@ -38,6 +41,7 @@ public class PaymentService {
     private final UserRepository userRepository;
     private final SecurityAccessService securityAccessService;
     private final AuditService auditService;
+    private final EmailService emailService;
     private final ObjectProvider<DatabasePaymentExecutor> databasePaymentExecutor;
 
     @Transactional(readOnly = true)
@@ -96,51 +100,76 @@ public class PaymentService {
         Payment payment;
         Bill updatedBill;
 
-        if (executor != null) {
-            executor.processPayment(
-                    billId,
-                    request.getAmount(),
-                    request.getPaymentMethod(),
-                    reference,
-                    request.getPaymentDate());
+        if (executor != null && executor.isProcedureAvailable()) {
+            try {
+                executor.processPayment(
+                        billId,
+                        request.getAmount(),
+                        request.getPaymentMethod(),
+                        reference,
+                        request.getPaymentDate());
 
-            updatedBill = billRepository.findByIdWithDetails(billId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Bill not found: " + billId));
-            payment = paymentRepository.findByPaymentReference(reference)
-                    .orElseThrow(() -> new ResourceNotFoundException("Payment not found: " + reference));
-            payment.setRecordedBy(recorder);
-            payment = paymentRepository.save(payment);
-        } else {
-            payment = Payment.builder()
-                    .paymentReference(reference)
-                    .bill(billForPayment)
-                    .amount(request.getAmount())
-                    .paymentMethod(request.getPaymentMethod())
-                    .paymentDate(request.getPaymentDate())
-                    .recordedAt(LocalDateTime.now())
-                    .recordedBy(recorder)
-                    .build();
-            paymentRepository.save(payment);
-
-            billForPayment.setAmountPaid(billForPayment.getAmountPaid().add(request.getAmount()));
-            billForPayment.setOutstandingBalance(billForPayment.getOutstandingBalance().subtract(request.getAmount()));
-
-            if (billForPayment.getOutstandingBalance().compareTo(BigDecimal.ZERO) <= 0) {
-                billForPayment.setOutstandingBalance(BigDecimal.ZERO);
-                billForPayment.setStatus(BillStatus.PAID);
-            } else {
-                billForPayment.setStatus(BillStatus.PARTIALLY_PAID);
+                updatedBill = billRepository.findByIdWithDetails(billId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Bill not found: " + billId));
+                payment = paymentRepository.findByPaymentReference(reference)
+                        .orElseThrow(() -> new ResourceNotFoundException("Payment not found: " + reference));
+                payment.setRecordedBy(recorder);
+                payment = paymentRepository.save(payment);
+            } catch (DataAccessException ex) {
+                log.warn("Stored procedure payment failed, using application layer: {}", ex.getMessage());
+                PaymentResult result = recordPaymentInApplication(billForPayment, request, recorder, reference);
+                payment = result.payment();
+                updatedBill = result.bill();
             }
-            updatedBill = billRepository.save(billForPayment);
+        } else {
+            if (executor != null) {
+                log.warn("process_payment_and_notify not found in database — using application layer");
+            }
+            PaymentResult result = recordPaymentInApplication(billForPayment, request, recorder, reference);
+            payment = result.payment();
+            updatedBill = result.bill();
         }
 
         if (updatedBill.getStatus() == BillStatus.PAID) {
             reconnectMeterIfNeeded(updatedBill.getMeter());
+            Bill billForEmail = billRepository.findByIdWithDetails(updatedBill.getId()).orElse(updatedBill);
+            emailService.sendBillPaidEmail(billForEmail);
         }
 
         auditService.log(AuditActionType.PAYMENT, "Bill", updatedBill.getId(),
                 updatedBill.getOutstandingBalance().toPlainString(), updatedBill.getStatus().name());
         return payment;
+    }
+
+    private PaymentResult recordPaymentInApplication(Bill billForPayment,
+                                                     PaymentRequest request,
+                                                     User recorder,
+                                                     String reference) {
+        Payment payment = Payment.builder()
+                .paymentReference(reference)
+                .bill(billForPayment)
+                .amount(request.getAmount())
+                .paymentMethod(request.getPaymentMethod())
+                .paymentDate(request.getPaymentDate())
+                .recordedAt(LocalDateTime.now())
+                .recordedBy(recorder)
+                .build();
+        paymentRepository.save(payment);
+
+        billForPayment.setAmountPaid(billForPayment.getAmountPaid().add(request.getAmount()));
+        billForPayment.setOutstandingBalance(billForPayment.getOutstandingBalance().subtract(request.getAmount()));
+
+        if (billForPayment.getOutstandingBalance().compareTo(BigDecimal.ZERO) <= 0) {
+            billForPayment.setOutstandingBalance(BigDecimal.ZERO);
+            billForPayment.setStatus(BillStatus.PAID);
+        } else {
+            billForPayment.setStatus(BillStatus.PARTIALLY_PAID);
+        }
+        Bill updatedBill = billRepository.save(billForPayment);
+        return new PaymentResult(payment, updatedBill);
+    }
+
+    private record PaymentResult(Payment payment, Bill bill) {
     }
 
     private String generatePaymentReference() {

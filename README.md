@@ -130,5 +130,6 @@ Bill statuses: `PENDING`, `APPROVED`, `PARTIALLY_PAID`, `PAID`, `OVERDUE`.
 - Versioned tariffs; new tariffs apply to future cycles only
 - Penalty applied when approved bill is past due (on view or payment)
 - Partial payments set `PARTIALLY_PAID`; full payment sets `PAID`
-- Bill generation inserts a customer notification (PostgreSQL DB trigger); approval attempts email (logs failure if mail not configured)
-- Full payment sets bill status to `PAID` and inserts a payment notification (PostgreSQL DB trigger)
+- Bill generation inserts a customer notification (PostgreSQL DB trigger) and sends email to the customer
+- Bill approval sends an approval email to the customer
+- Full payment sets bill status to `PAID`, inserts a payment notification (PostgreSQL DB trigger), and sends a paid confirmation email
